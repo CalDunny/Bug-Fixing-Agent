@@ -1,0 +1,3 @@
+MAX_CHARS = 10000
+TIMEOUT = 30.00
+PY_EXT = ".py"
