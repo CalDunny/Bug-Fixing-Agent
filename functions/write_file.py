@@ -17,7 +17,7 @@ def write_file(working_directory: str, file_path: str, content: str) -> str:
     
 
         # make sure parent directories exist
-        os.makedirs(file_path, exist_ok=True)
+        os.makedirs(os.path.dirname(target_file), exist_ok=True)
         # write new contents to file
         with open(target_file, "w") as f:
             f.write(content)

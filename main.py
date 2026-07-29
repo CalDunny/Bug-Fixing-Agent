@@ -2,8 +2,14 @@ import os
 import argparse
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
-from config import SYSTEM_PROMPT, AVAILABLE_FUNCTIONS
+from dataclasses import dataclass
+from config import SYSTEM_PROMPT, AVAILABLE_FUNCTIONS, CALL_LIMIT
+from functions.call_function import call_function
+
+@dataclass
+class GenerateResult:
+    prev_id: str
+    message: list[dict]
 
 
 def main() -> None:
@@ -20,31 +26,60 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     args = parser.parse_args()
 
-    messages: str = args.user_prompt
-    
+    message: str | list[dict] = args.user_prompt
+    prev_id = None
 
-    generate_content(client, messages, args.verbose)
+    for i in range(CALL_LIMIT):
+        response = generate_content(client, message, prev_id, args.verbose)
+        if response==None:
+            break
+        prev_id = response.prev_id
+        message = response.message
+    if i==CALL_LIMIT:
+        print("Error: Call limit exceeded")
+        exit(1)
 
 
 # generate a response from gemini using the API
-def generate_content(client: genai.Client, messages: list[dict], verbose) -> None:
+def generate_content(client: genai.Client, message: list, prev_id: str, verbose) -> GenerateResult:
     response = client.interactions.create(
-                model="gemini-2.5-flash", 
+                model="gemini-3.5-flash-lite", 
                 system_instruction=SYSTEM_PROMPT,
-                input = messages,
+                input = message,
+                previous_interaction_id = prev_id,
                 tools = AVAILABLE_FUNCTIONS,
-                store=False
+                store=True
                 )
     
     if response.usage is None:
         raise RuntimeError("Error: Gemini response failed")
     
     if verbose:
-        print(f"User prompt: {messages}")
+        print(f"User prompt: {message}")
         print(f"Prompt tokens: {response.usage.total_input_tokens}")
         print(f"Response tokens: {response.usage.total_output_tokens}")
-    
-    print(f"Response:\n{response.output_text}")
+
+    # Complete any function calls made
+    func_called = False
+    result_message = None
+
+    for step in response.steps:
+        if step.type == "function_call":
+            result_message = call_function(step, verbose)
+
+            if not result_message["result"][0]["text"]:
+                raise Exception("Error: Function call did not return a result")
+
+            if verbose:
+                print(f"-> {result_message["result"][0]["text"]}")
+
+            func_called = True
+
+    if not func_called:
+        print(f"Response:\n{response.output_text}")
+        return
+
+    return GenerateResult(prev_id=response.id, message=[result_message])
 
 
 if __name__ == "__main__":
